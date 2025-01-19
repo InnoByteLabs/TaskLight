@@ -15,6 +15,10 @@ final class Item {
     var isCompleted: Bool
     var isShared: Bool
     var assignedTo: String?
+    var isPriority: Bool
+    var notes: String?
+    var deletedDate: Date?
+    var isDeleted: Bool
     @Relationship(deleteRule: .cascade) var subTasks: [Item] = []
     var parentTask: Item?
     
@@ -24,5 +28,9 @@ final class Item {
         self.isCompleted = false
         self.isShared = false
         self.assignedTo = nil
+        self.isPriority = false
+        self.notes = nil
+        self.isDeleted = false
+        self.deletedDate = nil
     }
 }

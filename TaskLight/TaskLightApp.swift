@@ -6,14 +6,15 @@
 //
 
 import SwiftUI
-import SwiftData
 
 // TaskLight v1.2
 @main
 struct TaskLightApp: App {
+    @StateObject private var viewModel = TaskViewModel()
+    
     var body: some Scene {
         WindowGroup {
-            TaskListView()
+            ContentView(viewModel: viewModel)
         }
     }
 }

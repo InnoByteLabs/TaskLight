@@ -4,36 +4,48 @@ import Foundation
 class CloudKitManager {
     static let shared = CloudKitManager()
     
-    let container: CKContainer
-    let privateDatabase: CKDatabase
-    let sharedDatabase: CKDatabase
+    private let container: CKContainer
+    private let database: CKDatabase
     
     private init() {
         container = CKContainer(identifier: "iCloud.com.innobyte.tasklight")
-        privateDatabase = container.privateCloudDatabase
-        sharedDatabase = container.sharedCloudDatabase
+        database = container.privateCloudDatabase
     }
     
     func checkCloudKitAvailability() async throws {
-        try await container.accountStatus()
+        let status = try await container.accountStatus()
+        print("CloudKit Status: \(status.rawValue)")
+        
+        switch status {
+        case .available:
+            print("CloudKit is available")
+        case .noAccount:
+            throw CloudKitError.iCloudAccountNotFound
+        case .restricted:
+            throw CloudKitError.iCloudAccountRestricted
+        case .couldNotDetermine:
+            throw CloudKitError.iCloudAccountUnknown
+        @unknown default:
+            throw CloudKitError.iCloudAccountUnknown
+        }
     }
     
     // MARK: - CRUD Operations
     
     func save(_ record: CKRecord) async throws {
-        try await privateDatabase.save(record)
+        try await database.save(record)
     }
     
     func fetch(recordID: CKRecord.ID) async throws -> CKRecord {
-        try await privateDatabase.record(for: recordID)
+        try await database.record(for: recordID)
     }
     
     func delete(recordID: CKRecord.ID) async throws {
-        try await privateDatabase.deleteRecord(withID: recordID)
+        try await database.deleteRecord(withID: recordID)
     }
     
     func modify(_ record: CKRecord) async throws {
-        try await privateDatabase.modifyRecords(saving: [record], deleting: [])
+        try await database.modifyRecords(saving: [record], deleting: [])
     }
     
     // MARK: - Query Operations
@@ -49,7 +61,7 @@ class CloudKitManager {
         ]
         
         do {
-            let (matchResults, _) = try await privateDatabase.records(matching: query)
+            let (matchResults, _) = try await database.records(matching: query)
             let records = matchResults.compactMap { try? $0.1.get() }
             print("Found \(records.count) records")
             return records
@@ -68,11 +80,14 @@ class CloudKitManager {
     enum RecordKey {
         static let title = "title"
         static let isCompleted = "isCompleted"
-        static let dueDate = "dueDate"
-        static let priority = "priority"
         static let notes = "notes"
+        static let priority = "priority"
+        static let dueDate = "dueDate"
         static let createdAt = "createdAt"
         static let modifiedAt = "modifiedAt"
+        static let groupID = "groupID"
+        static let parentTaskID = "parentTaskID"
+        static let timestamp = "timestamp"
     }
     
     // Error handling
@@ -95,44 +110,70 @@ class CloudKitManager {
     
     // MARK: - Task Operations
     func fetchTasks() async throws -> [TaskItem] {
+        print("Fetching tasks...")
+        
+        // Use a simple predicate that only checks title exists
+        let titlePredicate = NSPredicate(format: "%K != %@", RecordKey.title, "")
+        let query = CKQuery(recordType: "Task", predicate: titlePredicate)
+        
+        // Use only indexed fields for sorting
+        query.sortDescriptors = [
+            NSSortDescriptor(key: RecordKey.priority, ascending: false),
+            NSSortDescriptor(key: RecordKey.createdAt, ascending: false)
+        ]
+        
         do {
-            let records = try await query(recordType: RecordType.task)
-            let tasks = records.compactMap { TaskItem(from: $0) }
-            print("Converted \(tasks.count) tasks")  // Debug print
+            let result = try await database.records(matching: query)
+            let tasks = result.matchResults.compactMap { try? TaskItem(from: $0.1.get()) }
+            print("Fetched \(tasks.count) tasks")
             return tasks
         } catch {
-            print("Fetch tasks error: \(error)")  // Full error
+            print("Error fetching tasks: \(error.localizedDescription)")
             throw error
         }
     }
     
-    func saveTasks(_ tasks: [TaskItem]) async throws {
+    func saveTask(_ task: TaskItem) async throws {
+        print("Saving task: \(task.title)")
+        
         do {
-            let records = tasks.map { $0.toCKRecord() }
-            print("Saving \(records.count) records")
-            
-            // Use modify instead of save for better update handling
-            let (savedResults, _) = try await privateDatabase.modifyRecords(
-                saving: records,
-                deleting: [],
-                savePolicy: .changedKeys // Only update changed fields
-            )
-            
-            for result in savedResults {
-                if case .failure(let error) = result.1 {
-                    print("Save error for record: \(error)")
-                    throw error
+            // Try to fetch existing record first
+            if let recordID = task.recordID {
+                do {
+                    let _ = try await database.record(for: recordID)
+                    // Record exists, use modify instead of save
+                    let record = task.toCKRecord()
+                    try await database.modifyRecords(saving: [record], deleting: [])
+                    print("Successfully modified existing task")
+                    return
+                } catch {
+                    print("Record not found, creating new one")
                 }
             }
-            print("Successfully saved records")
+            
+            // Create new record
+            let record = task.toCKRecord()
+            record[RecordKey.timestamp] = Date().timeIntervalSince1970
+            let savedRecord = try await database.save(record)
+            print("Successfully saved new task with ID: \(savedRecord.recordID.recordName)")
         } catch {
-            print("Save tasks error: \(error)")
+            print("Error saving task: \(error.localizedDescription)")
             throw error
         }
     }
     
     func deleteTask(_ task: TaskItem) async throws {
-        guard let recordID = task.recordID else { return }
-        _ = try await privateDatabase.deleteRecord(withID: recordID)
+        guard let recordID = task.recordID else {
+            print("No recordID found for task: \(task.title)")
+            return
+        }
+        
+        do {
+            try await database.deleteRecord(withID: recordID)
+            print("Successfully deleted task: \(task.title)")
+        } catch {
+            print("Error deleting task: \(error.localizedDescription)")
+            throw error
+        }
     }
 } 

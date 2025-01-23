@@ -6,44 +6,66 @@ struct AddTaskView: View {
     
     @State private var title = ""
     @State private var notes = ""
+    @State private var priority: TaskItem.Priority = .low
+    @State private var dueDate: Date = Date().addingTimeInterval(24 * 60 * 60) // Tomorrow
+    @State private var hasDueDate = false
     
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 20) {
+        NavigationView {
+            Form {
                 TextField("Title", text: $title)
-                    .textFieldStyle(.roundedBorder)
-                    .padding(.horizontal)
-                
                 TextField("Notes", text: $notes)
-                    .textFieldStyle(.roundedBorder)
-                    .padding(.horizontal)
                 
-                Spacer()
+                Picker("Priority", selection: $priority) {
+                    ForEach(TaskItem.Priority.allCases, id: \.self) { priority in
+                        Text(priority.title).tag(priority)
+                    }
+                }
+                
+                Section("Due Date") {
+                    Toggle("Set Due Date", isOn: $hasDueDate)
+                    
+                    if hasDueDate {
+                        DatePicker(
+                            "Due Date",
+                            selection: $dueDate,
+                            displayedComponents: [.date]
+                        )
+                    }
+                }
             }
-            .padding(.top)
             .navigationTitle("New Task")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar(content: {
-                ToolbarItem(placement: .navigationBarLeading) {
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
                         dismiss()
                     }
                 }
-                
-                ToolbarItem(placement: .navigationBarTrailing) {
+                ToolbarItem(placement: .confirmationAction) {
                     Button("Add") {
-                        let newTask = TaskItem(
+                        let task = TaskItem(
                             title: title,
-                            notes: notes.isEmpty ? nil : notes
+                            notes: notes.isEmpty ? nil : notes,
+                            priority: priority,
+                            dueDate: hasDueDate ? dueDate : nil
                         )
+                        
+                        // Dismiss immediately for better UX
+                        dismiss()
+                        
+                        // Then save the task
                         Task {
-                            await viewModel.addTask(newTask)
-                            dismiss()
+                            await viewModel.addTask(task)
                         }
                     }
                     .disabled(title.isEmpty)
                 }
-            })
+            }
         }
     }
+}
+
+#Preview {
+    AddTaskView(viewModel: TaskViewModel())
 } 

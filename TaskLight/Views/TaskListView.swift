@@ -6,7 +6,7 @@ struct TaskListView: View {
     @State private var searchText = ""
     @State private var showCompletedTasks = true
     @State private var sortOption: SortOption = .priority
-    @State private var isExpanded = true
+    @State private var expandedTasks: Set<String> = []  // Track expanded state per task
     
     enum SortOption: String, CaseIterable {
         case priority = "Priority"
@@ -39,61 +39,78 @@ struct TaskListView: View {
         List {
             ForEach(rootTasks) { parentTask in
                 // Parent task
-                TaskRowView(task: parentTask, viewModel: viewModel, isExpanded: $isExpanded)
-                    .swipeActions(edge: .leading) {
-                        Button {
-                            Task {
-                                await viewModel.toggleTaskCompletion(parentTask)
+                TaskRowView(
+                    task: parentTask,
+                    viewModel: viewModel,
+                    isExpanded: Binding(
+                        get: { expandedTasks.contains(parentTask.id) },
+                        set: { isExpanded in
+                            if isExpanded {
+                                expandedTasks.insert(parentTask.id)
+                            } else {
+                                expandedTasks.remove(parentTask.id)
                             }
-                        } label: {
-                            Label(parentTask.isCompleted ? "Mark Incomplete" : "Complete", 
-                                  systemImage: parentTask.isCompleted ? "xmark.circle" : "checkmark.circle")
                         }
-                        .tint(parentTask.isCompleted ? .gray : .green)
-                        
-                        Button {
-                            viewModel.showingAddSubtask = true
-                            viewModel.selectedParentTask = parentTask
-                        } label: {
-                            Label("Add Subtask", systemImage: "plus.circle")
+                    )
+                )
+                .swipeActions(edge: .leading) {
+                    Button {
+                        Task {
+                            await viewModel.toggleTaskCompletion(parentTask)
                         }
-                        .tint(.blue)
+                    } label: {
+                        Label(parentTask.isCompleted ? "Mark Incomplete" : "Complete", 
+                              systemImage: parentTask.isCompleted ? "xmark.circle" : "checkmark.circle")
                     }
-                    .swipeActions(edge: .trailing) {
-                        Button(role: .destructive) {
-                            Task {
-                                await viewModel.softDeleteTask(parentTask)
-                            }
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
+                    .tint(parentTask.isCompleted ? .gray : .green)
+                    
+                    Button {
+                        viewModel.showingAddSubtask = true
+                        viewModel.selectedParentTask = parentTask
+                    } label: {
+                        Label("Add Subtask", systemImage: "plus.circle")
                     }
+                    .tint(.blue)
+                }
+                .swipeActions(edge: .trailing) {
+                    Button(role: .destructive) {
+                        Task {
+                            await viewModel.softDeleteTask(parentTask)
+                        }
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
                 
-                // Subtasks
-                if parentTask.hasSubtasks {
+                // Only show subtasks if parent is expanded
+                if expandedTasks.contains(parentTask.id) {
                     ForEach(viewModel.subtasksFor(parentTask)) { subtask in
-                        TaskRowView(task: subtask, viewModel: viewModel, isExpanded: .constant(false))
-                            .padding(.leading, 20)  // Back to original padding
-                            .swipeActions(edge: .leading) {
-                                Button {
-                                    Task {
-                                        await viewModel.toggleTaskCompletion(subtask)
-                                    }
-                                } label: {
-                                    Label(subtask.isCompleted ? "Mark Incomplete" : "Complete", 
-                                          systemImage: subtask.isCompleted ? "xmark.circle" : "checkmark.circle")
+                        TaskRowView(
+                            task: subtask,
+                            viewModel: viewModel,
+                            isExpanded: .constant(false)
+                        )
+                        .padding(.leading, 20)
+                        .swipeActions(edge: .leading) {
+                            Button {
+                                Task {
+                                    await viewModel.toggleTaskCompletion(subtask)
                                 }
-                                .tint(subtask.isCompleted ? .gray : .green)
+                            } label: {
+                                Label(subtask.isCompleted ? "Mark Incomplete" : "Complete", 
+                                      systemImage: subtask.isCompleted ? "xmark.circle" : "checkmark.circle")
                             }
-                            .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) {
-                                    Task {
-                                        await viewModel.softDeleteTask(subtask)
-                                    }
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
+                            .tint(subtask.isCompleted ? .gray : .green)
+                        }
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) {
+                                Task {
+                                    await viewModel.softDeleteTask(subtask)
                                 }
+                            } label: {
+                                Label("Delete", systemImage: "trash")
                             }
+                        }
                     }
                 }
             }

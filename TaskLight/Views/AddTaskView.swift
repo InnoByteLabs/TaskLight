@@ -13,16 +13,19 @@ struct AddTaskView: View {
     var body: some View {
         NavigationView {
             Form {
-                TextField("Title", text: $title)
-                TextField("Notes", text: $notes)
+                Section {
+                    TextField("Title", text: $title)
+                }
                 
-                Picker("Priority", selection: $priority) {
-                    ForEach(TaskItem.Priority.allCases, id: \.self) { priority in
-                        Text(priority.title).tag(priority)
+                Section {
+                    Picker("Priority", selection: $priority) {
+                        ForEach(TaskItem.Priority.allCases, id: \.self) { priority in
+                            Text(priority.title).tag(priority)
+                        }
                     }
                 }
                 
-                Section("Due Date") {
+                Section {
                     Toggle("Set Due Date", isOn: $hasDueDate)
                     
                     if hasDueDate {
@@ -32,6 +35,11 @@ struct AddTaskView: View {
                             displayedComponents: [.date]
                         )
                     }
+                }
+                
+                Section("Notes") {
+                    TextEditor(text: $notes)
+                        .frame(minHeight: 100)
                 }
             }
             .navigationTitle("New Task")

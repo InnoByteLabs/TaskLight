@@ -4,6 +4,7 @@ import SwiftUI
 @MainActor
 class TaskViewModel: ObservableObject {
     @Published var tasks: [TaskItem] = []
+    @Published var deletedTasks: [TaskItem] = []
     @Published var errorMessage: String?
     @Published var isShowingError = false
     
@@ -33,7 +34,9 @@ class TaskViewModel: ObservableObject {
     
     func fetchTasks() async {
         do {
-            tasks = try await cloudKitManager.fetchTasks()
+            let allTasks = try await cloudKitManager.fetchTasks()
+            tasks = allTasks.filter { !$0.isDeleted }
+            deletedTasks = allTasks.filter { $0.isDeleted }
         } catch {
             errorMessage = error.localizedDescription
             isShowingError = true
@@ -67,6 +70,54 @@ class TaskViewModel: ObservableObject {
         } catch {
             // Refresh from server if delete failed
             await fetchTasks()
+            errorMessage = error.localizedDescription
+            isShowingError = true
+        }
+    }
+    
+    func softDeleteTask(_ task: TaskItem) async {
+        var updatedTask = task
+        updatedTask.isDeleted = true
+        updatedTask.deletedDate = Date()
+        
+        do {
+            // Remove from active tasks immediately
+            tasks.removeAll { $0.id == task.id }
+            // Add to deleted tasks immediately
+            deletedTasks.append(updatedTask)
+            
+            // Save to CloudKit
+            try await cloudKitManager.saveTask(updatedTask)
+            
+            // Refresh to ensure consistency
+            await fetchTasks()
+        } catch {
+            // Revert local changes if save fails
+            await fetchTasks()
+            errorMessage = error.localizedDescription
+            isShowingError = true
+        }
+    }
+    
+    func restoreTask(_ task: TaskItem) async {
+        var updatedTask = task
+        updatedTask.isDeleted = false
+        updatedTask.deletedDate = nil
+        
+        do {
+            try await cloudKitManager.saveTask(updatedTask)
+            await fetchTasks()
+        } catch {
+            errorMessage = error.localizedDescription
+            isShowingError = true
+        }
+    }
+    
+    func permanentlyDeleteTask(_ task: TaskItem) async {
+        do {
+            try await cloudKitManager.deleteTask(task)
+            await fetchTasks()
+        } catch {
             errorMessage = error.localizedDescription
             isShowingError = true
         }

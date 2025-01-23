@@ -22,6 +22,8 @@ struct TaskItem: Identifiable {
     var priority: Priority
     var dueDate: Date?
     var recordID: CKRecord.ID?
+    var isDeleted: Bool
+    var deletedDate: Date?
     
     init(
         id: String = UUID().uuidString,
@@ -30,7 +32,9 @@ struct TaskItem: Identifiable {
         notes: String? = nil,
         priority: Priority = .low,
         dueDate: Date? = nil,
-        recordID: CKRecord.ID? = nil
+        recordID: CKRecord.ID? = nil,
+        isDeleted: Bool = false,
+        deletedDate: Date? = nil
     ) {
         self.id = id
         self.title = title
@@ -39,6 +43,8 @@ struct TaskItem: Identifiable {
         self.priority = priority
         self.dueDate = dueDate
         self.recordID = recordID
+        self.isDeleted = isDeleted
+        self.deletedDate = deletedDate
     }
 }
 
@@ -50,10 +56,16 @@ extension TaskItem {
         self.id = record.recordID.recordName
         self.title = title
         self.isCompleted = (record[CloudKitManager.RecordKey.isCompleted] as? Int64 ?? 0) == 1
-        self.notes = record[CloudKitManager.RecordKey.notes] as? String
+        if let notes = record[CloudKitManager.RecordKey.notes] as? String, !notes.isEmpty {
+            self.notes = notes
+        } else {
+            self.notes = nil
+        }
         self.priority = Priority(rawValue: Int(record[CloudKitManager.RecordKey.priority] as? Int64 ?? 1)) ?? .medium
         self.dueDate = record[CloudKitManager.RecordKey.dueDate] as? Date
         self.recordID = record.recordID
+        self.isDeleted = (record[CloudKitManager.RecordKey.isDeleted] as? Int64 ?? 0) == 1
+        self.deletedDate = record[CloudKitManager.RecordKey.deletedDate] as? Date
     }
     
     func toCKRecord() -> CKRecord {
@@ -79,5 +91,7 @@ extension TaskItem {
         record[CloudKitManager.RecordKey.dueDate] = dueDate
         record[CloudKitManager.RecordKey.createdAt] = Date()
         record[CloudKitManager.RecordKey.modifiedAt] = Date()
+        record[CloudKitManager.RecordKey.isDeleted] = isDeleted ? 1 : 0
+        record[CloudKitManager.RecordKey.deletedDate] = deletedDate
     }
 }

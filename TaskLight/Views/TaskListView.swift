@@ -24,6 +24,9 @@ struct TaskListView: View {
     var filteredTasks: [TaskItem] {
         var tasks = viewModel.tasks
         
+        // Ensure we're only working with non-deleted tasks
+        tasks = tasks.filter { !$0.isDeleted }
+        
         // Filter by search text
         if !searchText.isEmpty {
             tasks = tasks.filter { $0.title.localizedCaseInsensitiveContains(searchText) }
@@ -57,10 +60,23 @@ struct TaskListView: View {
         List {
             ForEach(filteredTasks) { task in
                 TaskRowView(task: task, viewModel: viewModel)
-                    .swipeActions {
+                    .swipeActions(edge: .leading) {
+                        Button {
+                            var updatedTask = task
+                            updatedTask.isCompleted.toggle()
+                            Task {
+                                await viewModel.updateTask(updatedTask)
+                            }
+                        } label: {
+                            Label(task.isCompleted ? "Mark Incomplete" : "Complete", 
+                                  systemImage: task.isCompleted ? "xmark.circle" : "checkmark.circle")
+                        }
+                        .tint(task.isCompleted ? .gray : .green)
+                    }
+                    .swipeActions(edge: .trailing) {
                         Button(role: .destructive) {
                             Task {
-                                await viewModel.deleteTask(task)
+                                await viewModel.softDeleteTask(task)
                             }
                         } label: {
                             Label("Delete", systemImage: "trash")
@@ -90,6 +106,12 @@ struct TaskListView: View {
                     Image(systemName: "plus")
                 }
             }
+            
+            ToolbarItem(placement: .navigationBarLeading) {
+                NavigationLink(destination: TrashView(viewModel: viewModel)) {
+                    Image(systemName: "trash")
+                }
+            }
         }
         .sheet(isPresented: $showingAddTask) {
             AddTaskView(viewModel: viewModel)
@@ -102,42 +124,37 @@ struct TaskRowView: View {
     @ObservedObject var viewModel: TaskViewModel
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Button {
-                    var updatedTask = task
-                    updatedTask.isCompleted.toggle()
-                    Task {
-                        await viewModel.updateTask(updatedTask)
-                    }
-                } label: {
-                    Image(systemName: task.isCompleted ? "checkmark.circle.fill" : "circle")
-                }
-                
-                Text(task.title)
-                    .strikethrough(task.isCompleted)
-                
-                Spacer()
-                
-                if task.priority != .medium {
-                    Image(systemName: task.priority == .high ? "exclamationmark.2" : "minus")
-                        .foregroundColor(task.priority == .high ? .red : .gray)
-                }
-            }
-            
-            if let notes = task.notes {
-                Text(notes)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            
-            if let dueDate = task.dueDate {
+        NavigationLink(destination: TaskDetailView(task: task, viewModel: viewModel)) {
+            VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Image(systemName: "calendar")
+                    Text(task.title)
+                        .strikethrough(task.isCompleted)
+                        .lineLimit(2)
+                    
+                    Spacer()
+                    
+                    if task.priority != .medium {
+                        Image(systemName: task.priority == .high ? "exclamationmark.2" : "minus")
+                            .foregroundColor(task.priority == .high ? .red : .gray)
+                    }
+                }
+                
+                if let notes = task.notes {
+                    Text(notes)
+                        .font(.caption)
                         .foregroundColor(.secondary)
-                    Text(dueDate, style: .date)
-                        .font(.caption2)
-                        .foregroundColor(isDueDateOverdue(dueDate) ? .red : .secondary)
+                        .lineLimit(2)
+                        .truncationMode(.tail)
+                }
+                
+                if let dueDate = task.dueDate {
+                    HStack {
+                        Image(systemName: "calendar")
+                            .foregroundColor(.secondary)
+                        Text(dueDate, style: .date)
+                            .font(.caption2)
+                            .foregroundColor(isDueDateOverdue(dueDate) ? .red : .secondary)
+                    }
                 }
             }
         }

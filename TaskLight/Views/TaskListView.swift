@@ -3,6 +3,7 @@ import SwiftUI
 struct TaskListView: View {
     @ObservedObject var viewModel: TaskViewModel
     @State private var showingAddTask = false
+    @State private var showingAddGroup = false
     @State private var searchText = ""
     @State private var showCompletedTasks = true
     @State private var sortOption: SortOption = .priority
@@ -30,92 +31,211 @@ struct TaskListView: View {
         return sortTasks(completionFiltered)
     }
     
-    // Root tasks only
+    // Root tasks only (update to exclude grouped tasks)
     var rootTasks: [TaskItem] {
-        filteredTasks.filter { $0.parentTaskID == nil }
+        filteredTasks.filter { task in
+            task.parentTaskID == nil && task.groupID == nil  // Only show tasks that aren't in groups
+        }
     }
     
     var body: some View {
         List {
-            ForEach(rootTasks) { parentTask in
-                // Parent task
-                TaskRowView(
-                    task: parentTask,
-                    viewModel: viewModel,
-                    isExpanded: Binding(
-                        get: { expandedTasks.contains(parentTask.id) },
-                        set: { isExpanded in
-                            if isExpanded {
-                                expandedTasks.insert(parentTask.id)
-                            } else {
-                                expandedTasks.remove(parentTask.id)
+            // Groups
+            ForEach(viewModel.groups) { group in
+                DisclosureGroup {
+                    // Tasks in this group
+                    ForEach(viewModel.tasksForGroup(group)) { task in
+                        TaskRowView(
+                            task: task,
+                            viewModel: viewModel,
+                            isExpanded: Binding(
+                                get: { expandedTasks.contains(task.id) },
+                                set: { isExpanded in
+                                    if isExpanded {
+                                        expandedTasks.insert(task.id)
+                                    } else {
+                                        expandedTasks.remove(task.id)
+                                    }
+                                }
+                            )
+                        )
+                        .swipeActions(edge: .leading) {
+                            Button {
+                                Task {
+                                    var updatedTask = task
+                                    updatedTask.isCompleted.toggle()
+                                    await viewModel.updateTask(updatedTask)
+                                }
+                            } label: {
+                                Label(task.isCompleted ? "Mark Incomplete" : "Complete", 
+                                      systemImage: task.isCompleted ? "xmark.circle" : "checkmark.circle")
+                            }
+                            .tint(task.isCompleted ? .gray : .green)
+                            
+                            Button {
+                                viewModel.showingAddSubtask = true
+                                viewModel.selectedParentTask = task
+                            } label: {
+                                Label("Add Subtask", systemImage: "plus.circle")
+                            }
+                            .tint(.blue)
+                        }
+                        
+                        // Show subtasks if parent is expanded
+                        if task.hasSubtasks && expandedTasks.contains(task.id) {
+                            ForEach(viewModel.subtasksFor(task)) { subtask in
+                                TaskRowView(
+                                    task: subtask,
+                                    viewModel: viewModel,
+                                    isExpanded: .constant(false)
+                                )
+                                .padding(.leading, 20)
+                                .swipeActions(edge: .leading) {
+                                    Button {
+                                        Task {
+                                            var updatedSubtask = subtask
+                                            updatedSubtask.isCompleted.toggle()
+                                            await viewModel.updateTask(updatedSubtask)
+                                        }
+                                    } label: {
+                                        Label(subtask.isCompleted ? "Mark Incomplete" : "Complete", 
+                                              systemImage: subtask.isCompleted ? "xmark.circle" : "checkmark.circle")
+                                    }
+                                    .tint(subtask.isCompleted ? .gray : .green)
+                                }
+                                .swipeActions(edge: .trailing) {
+                                    Button(role: .destructive) {
+                                        Task {
+                                            await viewModel.softDeleteTask(subtask)
+                                        }
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                }
                             }
                         }
-                    )
-                )
+                    }
+                } label: {
+                    HStack {
+                        Image(systemName: "folder.fill")
+                            .foregroundColor(.blue)
+                        Text(group.title)
+                            .font(.headline)
+                        Spacer()
+                        if group.isCompleted {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                        }
+                    }
+                }
                 .swipeActions(edge: .leading) {
                     Button {
                         Task {
-                            await viewModel.toggleTaskCompletion(parentTask)
+                            await viewModel.toggleGroupCompletion(group)
                         }
                     } label: {
-                        Label(parentTask.isCompleted ? "Mark Incomplete" : "Complete", 
-                              systemImage: parentTask.isCompleted ? "xmark.circle" : "checkmark.circle")
+                        Label(group.isCompleted ? "Mark Incomplete" : "Complete", 
+                              systemImage: group.isCompleted ? "xmark.circle" : "checkmark.circle")
                     }
-                    .tint(parentTask.isCompleted ? .gray : .green)
-                    
-                    Button {
-                        viewModel.showingAddSubtask = true
-                        viewModel.selectedParentTask = parentTask
-                    } label: {
-                        Label("Add Subtask", systemImage: "plus.circle")
-                    }
-                    .tint(.blue)
+                    .tint(group.isCompleted ? .gray : .green)
                 }
                 .swipeActions(edge: .trailing) {
                     Button(role: .destructive) {
                         Task {
-                            await viewModel.softDeleteTask(parentTask)
+                            await viewModel.softDeleteGroup(group)
                         }
                     } label: {
                         Label("Delete", systemImage: "trash")
                     }
                 }
-                
-                // Only show subtasks if parent is expanded
-                if expandedTasks.contains(parentTask.id) {
-                    ForEach(viewModel.subtasksFor(parentTask)) { subtask in
-                        TaskRowView(
-                            task: subtask,
-                            viewModel: viewModel,
-                            isExpanded: .constant(false)
-                        )
-                        .padding(.leading, 20)
-                        .swipeActions(edge: .leading) {
-                            Button {
-                                Task {
-                                    await viewModel.toggleTaskCompletion(subtask)
+            }
+            
+            // Ungrouped Tasks
+            Section(header: Text("Tasks")) {
+                ForEach(rootTasks) { parentTask in
+                    // Parent task
+                    TaskRowView(
+                        task: parentTask,
+                        viewModel: viewModel,
+                        isExpanded: Binding(
+                            get: { expandedTasks.contains(parentTask.id) },
+                            set: { isExpanded in
+                                if isExpanded {
+                                    expandedTasks.insert(parentTask.id)
+                                } else {
+                                    expandedTasks.remove(parentTask.id)
                                 }
-                            } label: {
-                                Label(subtask.isCompleted ? "Mark Incomplete" : "Complete", 
-                                      systemImage: subtask.isCompleted ? "xmark.circle" : "checkmark.circle")
                             }
-                            .tint(subtask.isCompleted ? .gray : .green)
+                        )
+                    )
+                    .swipeActions(edge: .leading) {
+                        Button {
+                            Task {
+                                var updatedTask = parentTask
+                                updatedTask.isCompleted.toggle()
+                                await viewModel.updateTask(updatedTask)
+                            }
+                        } label: {
+                            Label(parentTask.isCompleted ? "Mark Incomplete" : "Complete", 
+                                  systemImage: parentTask.isCompleted ? "xmark.circle" : "checkmark.circle")
                         }
-                        .swipeActions(edge: .trailing) {
-                            Button(role: .destructive) {
-                                Task {
-                                    await viewModel.softDeleteTask(subtask)
+                        .tint(parentTask.isCompleted ? .gray : .green)
+                        
+                        Button {
+                            viewModel.showingAddSubtask = true
+                            viewModel.selectedParentTask = parentTask
+                        } label: {
+                            Label("Add Subtask", systemImage: "plus.circle")
+                        }
+                        .tint(.blue)
+                    }
+                    .swipeActions(edge: .trailing) {
+                        Button(role: .destructive) {
+                            Task {
+                                await viewModel.softDeleteTask(parentTask)
+                            }
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
+                    
+                    // Only show subtasks if parent is expanded
+                    if expandedTasks.contains(parentTask.id) {
+                        ForEach(viewModel.subtasksFor(parentTask)) { subtask in
+                            TaskRowView(
+                                task: subtask,
+                                viewModel: viewModel,
+                                isExpanded: .constant(false)
+                            )
+                            .padding(.leading, 20)
+                            .swipeActions(edge: .leading) {
+                                Button {
+                                    Task {
+                                        var updatedSubtask = subtask
+                                        updatedSubtask.isCompleted.toggle()
+                                        await viewModel.updateTask(updatedSubtask)
+                                    }
+                                } label: {
+                                    Label(subtask.isCompleted ? "Mark Incomplete" : "Complete", 
+                                          systemImage: subtask.isCompleted ? "xmark.circle" : "checkmark.circle")
                                 }
-                            } label: {
-                                Label("Delete", systemImage: "trash")
+                                .tint(subtask.isCompleted ? .gray : .green)
+                            }
+                            .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) {
+                                    Task {
+                                        await viewModel.softDeleteTask(subtask)
+                                    }
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
                             }
                         }
                     }
                 }
             }
         }
-        .listStyle(.plain)
+        .listStyle(.insetGrouped)
         .searchable(text: $searchText, prompt: "Search tasks")
         .navigationTitle("Tasks")
         .toolbar {
@@ -130,6 +250,12 @@ struct TaskListView: View {
                     Toggle("Show Completed", isOn: $showCompletedTasks)
                 } label: {
                     Label("Filter", systemImage: "line.3.horizontal.decrease.circle")
+                }
+            }
+            
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button(action: { showingAddGroup = true }) {
+                    Image(systemName: "folder.badge.plus")
                 }
             }
             
@@ -152,6 +278,12 @@ struct TaskListView: View {
             if let parentTask = viewModel.selectedParentTask {
                 AddSubtaskView(viewModel: viewModel, parentTask: parentTask)
             }
+        }
+        .sheet(isPresented: $showingAddGroup) {
+            AddGroupView(viewModel: viewModel)
+        }
+        .task {
+            await viewModel.fetchGroups()
         }
     }
     

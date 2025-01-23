@@ -6,15 +6,17 @@ struct AddTaskView: View {
     
     @State private var title = ""
     @State private var notes = ""
-    @State private var priority: TaskItem.Priority = .low
-    @State private var dueDate: Date = Date().addingTimeInterval(24 * 60 * 60) // Tomorrow
-    @State private var hasDueDate = false
+    @State private var priority: TaskItem.Priority = .medium
+    @State private var dueDate: Date?
+    @State private var selectedGroupID: String?
     
     var body: some View {
         NavigationView {
             Form {
                 Section {
                     TextField("Title", text: $title)
+                    TextField("Notes", text: $notes, axis: .vertical)
+                        .lineLimit(4, reservesSpace: true)
                 }
                 
                 Section {
@@ -26,20 +28,25 @@ struct AddTaskView: View {
                 }
                 
                 Section {
-                    Toggle("Set Due Date", isOn: $hasDueDate)
-                    
-                    if hasDueDate {
-                        DatePicker(
-                            "Due Date",
-                            selection: $dueDate,
-                            displayedComponents: [.date]
-                        )
-                    }
+                    DatePicker("Due Date",
+                              selection: Binding(
+                                get: { dueDate ?? Date() },
+                                set: { dueDate = $0 }
+                              ),
+                              displayedComponents: [.date])
+                    Toggle("Has Due Date", isOn: Binding(
+                        get: { dueDate != nil },
+                        set: { if !$0 { dueDate = nil } else if dueDate == nil { dueDate = Date() } }
+                    ))
                 }
                 
-                Section("Notes") {
-                    TextEditor(text: $notes)
-                        .frame(minHeight: 100)
+                Section {
+                    Picker("Group", selection: $selectedGroupID) {
+                        Text("None").tag(String?.none)
+                        ForEach(viewModel.groups) { group in
+                            Text(group.title).tag(Optional(group.id))
+                        }
+                    }
                 }
             }
             .navigationTitle("New Task")
@@ -50,26 +57,28 @@ struct AddTaskView: View {
                         dismiss()
                     }
                 }
+                
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add") {
-                        let task = TaskItem(
-                            title: title,
-                            notes: notes.isEmpty ? nil : notes,
-                            priority: priority,
-                            dueDate: hasDueDate ? dueDate : nil
-                        )
-                        
-                        // Dismiss immediately for better UX
-                        dismiss()
-                        
-                        // Then save the task
                         Task {
+                            let task = TaskItem(
+                                title: title,
+                                notes: notes.isEmpty ? nil : notes,
+                                priority: priority,
+                                dueDate: dueDate,
+                                groupID: selectedGroupID
+                            )
                             await viewModel.addTask(task)
+                            dismiss()
                         }
                     }
                     .disabled(title.isEmpty)
                 }
             }
+        }
+        .task {
+            // Fetch groups when view appears
+            await viewModel.fetchGroups()
         }
     }
 }

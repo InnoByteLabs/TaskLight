@@ -27,20 +27,23 @@ struct TaskItem: Identifiable {
     var parentTaskID: String?
     var hasSubtasks: Bool
     var isExpanded: Bool
+    var groupID: String?
     
     init(
         id: String = UUID().uuidString,
         title: String,
         isCompleted: Bool = false,
         notes: String? = nil,
-        priority: Priority = .low,
+        priority: Priority = .medium,
         dueDate: Date? = nil,
-        recordID: CKRecord.ID? = nil,
+        createdAt: Date = Date(),
+        modifiedAt: Date = Date(),
+        parentTaskID: String? = nil,
+        groupID: String? = nil,
         isDeleted: Bool = false,
         deletedDate: Date? = nil,
-        parentTaskID: String? = nil,
         hasSubtasks: Bool = false,
-        isExpanded: Bool = false
+        recordID: CKRecord.ID? = nil
     ) {
         self.id = id
         self.title = title
@@ -53,7 +56,8 @@ struct TaskItem: Identifiable {
         self.deletedDate = deletedDate
         self.parentTaskID = parentTaskID
         self.hasSubtasks = hasSubtasks
-        self.isExpanded = isExpanded
+        self.isExpanded = false  // Always start collapsed
+        self.groupID = groupID
     }
 }
 
@@ -78,6 +82,7 @@ extension TaskItem {
         self.parentTaskID = record[CloudKitManager.RecordKey.parentTaskID] as? String
         self.hasSubtasks = (record[CloudKitManager.RecordKey.hasSubtasks] as? Int64 ?? 0) == 1
         self.isExpanded = false  // Always start collapsed
+        self.groupID = record[CloudKitManager.RecordKey.groupID] as? String
     }
     
     func toCKRecord() -> CKRecord {
@@ -107,5 +112,6 @@ extension TaskItem {
         record[CloudKitManager.RecordKey.deletedDate] = deletedDate
         record[CloudKitManager.RecordKey.parentTaskID] = parentTaskID
         record[CloudKitManager.RecordKey.hasSubtasks] = hasSubtasks ? 1 : 0
+        record[CloudKitManager.RecordKey.groupID] = groupID
     }
 }

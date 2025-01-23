@@ -4,106 +4,92 @@ struct TaskDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var viewModel: TaskViewModel
     @State private var task: TaskItem
-    @State private var editedTitle: String
-    @State private var editedNotes: String
-    @State private var editedPriority: TaskItem.Priority
-    @State private var editedDueDate: Date
-    @State private var hasDueDate: Bool
+    @State private var showingDeleteConfirmation = false
+    @State private var selectedGroupID: String?
     
     init(task: TaskItem, viewModel: TaskViewModel) {
         self.viewModel = viewModel
         _task = State(initialValue: task)
-        _editedTitle = State(initialValue: task.title)
-        _editedNotes = State(initialValue: task.notes ?? "")
-        _editedPriority = State(initialValue: task.priority)
-        _editedDueDate = State(initialValue: task.dueDate ?? Date())
-        _hasDueDate = State(initialValue: task.dueDate != nil)
+        _selectedGroupID = State(initialValue: task.groupID)
     }
     
     var body: some View {
-        List {
+        Form {
             Section {
-                TextField("Title", text: $editedTitle)
-                    .font(.headline)
+                TextField("Title", text: $task.title)
+                TextField("Notes", text: Binding(
+                    get: { task.notes ?? "" },
+                    set: { task.notes = $0.isEmpty ? nil : $0 }
+                ), axis: .vertical)
+                .lineLimit(4, reservesSpace: true)
             }
             
-            Section("Priority") {
-                Picker("Priority", selection: $editedPriority) {
+            Section {
+                Picker("Priority", selection: $task.priority) {
                     ForEach(TaskItem.Priority.allCases, id: \.self) { priority in
-                        Label(priority.title, systemImage: priorityIcon(for: priority))
-                            .foregroundColor(priorityColor(for: priority))
-                            .tag(priority)
+                        Text(priority.title).tag(priority)
                     }
                 }
             }
             
-            Section("Due Date") {
-                Toggle("Has Due Date", isOn: $hasDueDate)
-                
-                if hasDueDate {
-                    DatePicker("Due Date", selection: $editedDueDate, displayedComponents: [.date])
+            Section {
+                DatePicker("Due Date",
+                          selection: Binding(
+                            get: { task.dueDate ?? Date() },
+                            set: { task.dueDate = $0 }
+                          ),
+                          displayedComponents: [.date])
+                Toggle("Has Due Date", isOn: Binding(
+                    get: { task.dueDate != nil },
+                    set: { if !$0 { task.dueDate = nil } else if task.dueDate == nil { task.dueDate = Date() } }
+                ))
+            }
+            
+            Section {
+                Picker("Group", selection: $selectedGroupID) {
+                    Text("None").tag(String?.none)
+                    ForEach(viewModel.groups) { group in
+                        Text(group.title).tag(Optional(group.id))
+                    }
                 }
             }
             
-            Section("Notes") {
-                TextEditor(text: $editedNotes)
-                    .frame(minHeight: 100)
-            }
-        }
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button("Save") {
-                    saveChanges()
-                    dismiss()
+            if !task.isDeleted {
+                Section {
+                    Button(role: .destructive) {
+                        showingDeleteConfirmation = true
+                    } label: {
+                        Label("Delete Task", systemImage: "trash")
+                    }
                 }
             }
         }
-        .onChange(of: editedTitle) { _ in saveChanges() }
-        .onChange(of: editedPriority) { _ in saveChanges() }
-        .onChange(of: hasDueDate) { _ in saveChanges() }
-        .onChange(of: editedDueDate) { _ in 
-            if hasDueDate {
-                saveChanges()
+        .navigationTitle("Edit Task")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save") {
+                    Task {
+                        var updatedTask = task
+                        updatedTask.groupID = selectedGroupID
+                        await viewModel.updateTask(updatedTask)
+                        dismiss()
+                    }
+                }
             }
         }
-    }
-    
-    private func saveChanges() {
-        var updatedTask = task
-        updatedTask.title = editedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedNotes = editedNotes.trimmingCharacters(in: .whitespacesAndNewlines)
-        updatedTask.notes = trimmedNotes.isEmpty ? nil : trimmedNotes
-        updatedTask.priority = editedPriority
-        updatedTask.dueDate = hasDueDate ? editedDueDate : nil
-        
-        Task {
-            print("Saving task with notes: \(updatedTask.notes ?? "nil")")
-            await viewModel.updateTask(updatedTask)
-            task = updatedTask
+        .confirmationDialog(
+            "Are you sure you want to delete this task?",
+            isPresented: $showingDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                Task {
+                    await viewModel.softDeleteTask(task)
+                    dismiss()
+                }
+            }
+            Button("Cancel", role: .cancel) { }
         }
-    }
-    
-    private func priorityIcon(for priority: TaskItem.Priority) -> String {
-        switch priority {
-        case .high: return "exclamationmark.2"
-        case .medium: return "exclamationmark"
-        case .low: return "minus"
-        }
-    }
-    
-    private func priorityColor(for priority: TaskItem.Priority) -> Color {
-        switch priority {
-        case .high: return .red
-        case .medium: return .orange
-        case .low: return .gray
-        }
-    }
-    
-    private func isDueDateOverdue(_ date: Date) -> Bool {
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
-        let dueDate = calendar.startOfDay(for: date)
-        return dueDate < today
     }
 } 

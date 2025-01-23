@@ -91,6 +91,14 @@ class CloudKitManager {
         static let isDeleted = "isDeleted"
         static let deletedDate = "deletedDate"
         static let hasSubtasks = "hasSubtasks"
+        
+        // Group keys
+        static let groupTitle = "title"
+        static let groupIsCompleted = "isCompleted"
+        static let groupCreatedAt = "createdAt"
+        static let groupModifiedAt = "modifiedAt"
+        static let groupIsDeleted = "isDeleted"
+        static let groupDeletedDate = "deletedDate"
     }
     
     // Error handling
@@ -220,5 +228,58 @@ class CloudKitManager {
             print("Error deleting task: \(error.localizedDescription)")
             throw error
         }
+    }
+    
+    // Constants for record types
+    private let taskRecordType = "Task"
+    private let groupRecordType = "Group"
+    
+    // Basic CRUD functions for groups
+    func saveGroup(_ group: TaskGroup) async throws {
+        if let recordID = group.recordID {
+            // Update existing group
+            do {
+                let record = try await database.record(for: recordID)
+                record[RecordKey.groupTitle] = group.title
+                record[RecordKey.groupIsCompleted] = group.isCompleted ? 1 : 0
+                record[RecordKey.groupModifiedAt] = Date()
+                record[RecordKey.groupIsDeleted] = group.isDeleted ? 1 : 0
+                record[RecordKey.groupDeletedDate] = group.deletedDate
+                
+                try await database.save(record)
+            } catch {
+                throw error
+            }
+        } else {
+            // Create new group
+            let record = CKRecord(recordType: groupRecordType)
+            record[RecordKey.groupTitle] = group.title
+            record[RecordKey.groupIsCompleted] = group.isCompleted ? 1 : 0
+            record[RecordKey.groupCreatedAt] = Date()
+            record[RecordKey.groupModifiedAt] = Date()
+            record[RecordKey.groupIsDeleted] = group.isDeleted ? 1 : 0
+            record[RecordKey.groupDeletedDate] = group.deletedDate
+            
+            try await database.save(record)
+        }
+    }
+    
+    func fetchGroups() async throws -> [TaskGroup] {
+        let predicate = NSPredicate(value: true)
+        let query = CKQuery(recordType: groupRecordType, predicate: predicate)
+        query.sortDescriptors = [NSSortDescriptor(key: RecordKey.groupCreatedAt, ascending: false)]
+        
+        do {
+            let (matchResults, _) = try await database.records(matching: query)
+            return matchResults.compactMap { try? TaskGroup(record: $0.1.get()) }
+        } catch {
+            print("Error fetching groups: \(error.localizedDescription)")
+            throw error
+        }
+    }
+    
+    func deleteGroup(_ group: TaskGroup) async throws {
+        guard let recordID = group.recordID else { return }
+        try await database.deleteRecord(withID: recordID)
     }
 } 

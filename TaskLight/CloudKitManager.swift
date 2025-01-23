@@ -90,6 +90,7 @@ class CloudKitManager {
         static let timestamp = "timestamp"
         static let isDeleted = "isDeleted"
         static let deletedDate = "deletedDate"
+        static let hasSubtasks = "hasSubtasks"
     }
     
     // Error handling
@@ -160,7 +161,8 @@ class CloudKitManager {
     
     func saveTask(_ task: TaskItem) async throws {
         print("Saving task: \(task.title)")
-        print("isDeleted: \(task.isDeleted)")  // Debug log
+        print("isDeleted: \(task.isDeleted)")
+        print("hasSubtasks: \(task.hasSubtasks)")  // Debug log
         
         do {
             // Try to fetch existing record first
@@ -176,13 +178,14 @@ class CloudKitManager {
                     existingRecord[RecordKey.priority] = Int64(task.priority.rawValue)
                     existingRecord[RecordKey.dueDate] = task.dueDate
                     existingRecord[RecordKey.modifiedAt] = Date()
-                    existingRecord[RecordKey.isDeleted] = task.isDeleted ? 1 : 0  // Make sure we set isDeleted
-                    existingRecord[RecordKey.deletedDate] = task.deletedDate      // And deletedDate
+                    existingRecord[RecordKey.isDeleted] = task.isDeleted ? 1 : 0
+                    existingRecord[RecordKey.deletedDate] = task.deletedDate
+                    existingRecord[RecordKey.parentTaskID] = task.parentTaskID
+                    existingRecord[RecordKey.hasSubtasks] = task.hasSubtasks ? 1 : 0
                     
                     // Save modifications
                     try await database.modifyRecords(saving: [existingRecord], deleting: [])
                     print("Successfully modified existing task")
-                    print("isDeleted status: \(existingRecord[RecordKey.isDeleted] ?? "nil")")
                     return
                 } catch {
                     print("Record not found or error: \(error.localizedDescription)")
@@ -192,12 +195,12 @@ class CloudKitManager {
             // Create new record
             let record = task.toCKRecord()
             record[RecordKey.timestamp] = Date().timeIntervalSince1970
-            record[RecordKey.isDeleted] = task.isDeleted ? 1 : 0  // Make sure we set isDeleted for new records
-            record[RecordKey.deletedDate] = task.deletedDate      // And deletedDate for new records
+            record[RecordKey.isDeleted] = task.isDeleted ? 1 : 0
+            record[RecordKey.deletedDate] = task.deletedDate
+            record[RecordKey.hasSubtasks] = task.hasSubtasks ? 1 : 0
             
             let savedRecord = try await database.save(record)
             print("Successfully saved new task with ID: \(savedRecord.recordID.recordName)")
-            print("isDeleted status: \(savedRecord[RecordKey.isDeleted] ?? "nil")")
         } catch {
             print("Error saving task: \(error.localizedDescription)")
             throw error

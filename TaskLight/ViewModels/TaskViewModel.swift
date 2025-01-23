@@ -5,6 +5,8 @@ import SwiftUI
 class TaskViewModel: ObservableObject {
     @Published var tasks: [TaskItem] = []
     @Published var deletedTasks: [TaskItem] = []
+    @Published var showingAddSubtask = false
+    @Published var selectedParentTask: TaskItem?
     @Published var errorMessage: String?
     @Published var isShowingError = false
     
@@ -81,18 +83,39 @@ class TaskViewModel: ObservableObject {
         updatedTask.deletedDate = Date()
         
         do {
-            // Remove from active tasks immediately
+            // Delete the parent task
+            try await cloudKitManager.saveTask(updatedTask)
             tasks.removeAll { $0.id == task.id }
-            // Add to deleted tasks immediately
             deletedTasks.append(updatedTask)
             
-            // Save to CloudKit
-            try await cloudKitManager.saveTask(updatedTask)
+            // Delete all subtasks if this is a parent task
+            if task.hasSubtasks {
+                let subtasks = self.subtasksFor(task)
+                for var subtask in subtasks {
+                    subtask.isDeleted = true
+                    subtask.deletedDate = Date()
+                    try await cloudKitManager.saveTask(subtask)
+                    tasks.removeAll { $0.id == subtask.id }
+                    deletedTasks.append(subtask)
+                }
+            }
             
-            // Refresh to ensure consistency
+            // Update parent task if this is a subtask
+            if let parentID = task.parentTaskID,
+               let parentTask = tasks.first(where: { $0.id == parentID }) {
+                let remainingSubtasks = subtasksFor(parentTask).filter { !$0.isDeleted }
+                if remainingSubtasks.isEmpty {
+                    var updatedParent = parentTask
+                    updatedParent.hasSubtasks = false
+                    try await cloudKitManager.saveTask(updatedParent)
+                    if let index = tasks.firstIndex(where: { $0.id == parentID }) {
+                        tasks[index] = updatedParent
+                    }
+                }
+            }
+            
             await fetchTasks()
         } catch {
-            // Revert local changes if save fails
             await fetchTasks()
             errorMessage = error.localizedDescription
             isShowingError = true
@@ -131,5 +154,82 @@ class TaskViewModel: ObservableObject {
             errorMessage = error.localizedDescription
             isShowingError = true
         }
+    }
+    
+    // Get subtasks for a specific task
+    func subtasksFor(_ task: TaskItem) -> [TaskItem] {
+        tasks.filter { $0.parentTaskID == task.id }
+    }
+    
+    // Add a subtask to a parent task
+    func addSubtask(_ subtask: TaskItem, to parentTask: TaskItem) async {
+        do {
+            // Update parent task to indicate it has subtasks
+            var updatedParent = parentTask
+            updatedParent.hasSubtasks = true
+            
+            // Save both the subtask and updated parent
+            try await cloudKitManager.saveTask(subtask)
+            try await cloudKitManager.saveTask(updatedParent)
+            
+            // Update local arrays
+            if let index = tasks.firstIndex(where: { $0.id == parentTask.id }) {
+                tasks[index] = updatedParent
+            }
+            tasks.append(subtask)
+            
+        } catch {
+            errorMessage = error.localizedDescription
+            isShowingError = true
+        }
+    }
+    
+    // Toggle task completion (also handles subtasks)
+    func toggleTaskCompletion(_ task: TaskItem) async {
+        var updatedTask = task
+        updatedTask.isCompleted.toggle()
+        
+        do {
+            // Update the parent task
+            try await cloudKitManager.saveTask(updatedTask)
+            if let index = tasks.firstIndex(where: { $0.id == task.id }) {
+                tasks[index] = updatedTask
+            }
+            
+            // If this is a parent task, update all its subtasks
+            if task.hasSubtasks {
+                let subtasks = self.subtasksFor(task)
+                for var subtask in subtasks {
+                    subtask.isCompleted = updatedTask.isCompleted
+                    try await cloudKitManager.saveTask(subtask)
+                    if let index = tasks.firstIndex(where: { $0.id == subtask.id }) {
+                        tasks[index] = subtask
+                    }
+                }
+            }
+            
+            // If this is a subtask, check if all siblings are completed
+            if let parentID = task.parentTaskID,
+               let parentTask = tasks.first(where: { $0.id == parentID }) {
+                let siblings = subtasksFor(parentTask)
+                let allCompleted = siblings.allSatisfy { $0.isCompleted }
+                if parentTask.isCompleted != allCompleted {
+                    var updatedParent = parentTask
+                    updatedParent.isCompleted = allCompleted
+                    try await cloudKitManager.saveTask(updatedParent)
+                    if let index = tasks.firstIndex(where: { $0.id == parentID }) {
+                        tasks[index] = updatedParent
+                    }
+                }
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+            isShowingError = true
+        }
+    }
+    
+    // Update filtered tasks to handle parent-child relationships
+    var filteredRootTasks: [TaskItem] {
+        tasks.filter { $0.parentTaskID == nil }  // Only return top-level tasks
     }
 }
